@@ -1,0 +1,47 @@
+{
+  "name": "claude-next",
+  "version": "0.1.0",
+  "description": "One-key handoff for deep Claude Code sessions with independent fresh-context audit. Pass your work to a fresh window via a pass-phrase (continue A / 继续 A), with built-in drift checks and forced uncertainty declarations.",
+  "keywords": [
+    "claude",
+    "claude-code",
+    "claude-ai",
+    "anthropic",
+    "session-handoff",
+    "context-management",
+    "agent",
+    "ai-coding",
+    "developer-tools",
+    "llm",
+    "memory-bank"
+  ],
+  "homepage": "https://github.com/llmapi-pro/claude-next#readme",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/llmapi-pro/claude-next.git"
+  },
+  "bugs": {
+    "url": "https://github.com/llmapi-pro/claude-next/issues"
+  },
+  "license": "MIT",
+  "author": "llmapi-pro contributors",
+  "bin": {
+    "claude-next": "./bin/cli.js"
+  },
+  "files": [
+    "bin/",
+    "scripts/",
+    "templates/",
+    "SKILL.md",
+    "install.sh",
+    "README.md",
+    "LICENSE",
+    "CHANGELOG.md"
+  ],
+  "engines": {
+    "node": ">=16.7.0"
+  },
+  "scripts": {
+    "postinstall": "node bin/cli.js help-postinstall || true"
+  }
+}

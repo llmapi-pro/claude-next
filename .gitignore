@@ -1,0 +1,27 @@
+# Node
+node_modules/
+*.log
+npm-debug.log*
+.npm/
+
+# Runtime state of the installed skill (never in repo)
+pending/
+consumed/
+
+# Backups
+*.bak
+*.bak-*
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Editor
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# Local dev
+/node_modules
+/dist
