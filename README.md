@@ -293,6 +293,18 @@ npx claude-next install
 
 ---
 
+## Related Projects
+
+From the same maintainer:
+
+- [llmapi-pro/claude-code-setup](https://github.com/llmapi-pro/claude-code-setup) — One-line installer for Claude Code with a Claude-compatible relay backend.
+- [llmapi-pro/claude-md-templates](https://github.com/llmapi-pro/claude-md-templates) — Drop-in `CLAUDE.md` templates for popular stacks (Next.js, FastAPI, Express+TS, Go).
+- [llmapi-pro/awesome-claude-code-china](https://github.com/llmapi-pro/awesome-claude-code-china) — Curated Claude Code resources for Chinese developers (tutorials, mirror services, tools).
+
+For the backend that powers the default install, see [llmapi.pro](https://llmapi.pro).
+
+---
+
 ## Credits
 
 Built by humans working alongside Claude. Inspired by the pain of every deep session that hit 400K and fell over.
