@@ -1,7 +1,7 @@
 {
   "name": "claude-next",
-  "version": "0.1.0",
-  "description": "One-key handoff for deep Claude Code sessions with independent fresh-context audit. Pass your work to a fresh window via a pass-phrase (continue A / 继续 A), with built-in drift checks and forced uncertainty declarations.",
+  "version": "0.2.3",
+  "description": "Handoff + autonomous rotation for deep Claude Code sessions. v0.1 adds /next pass-phrase handoffs with fresh-context audit; v0.2 adds `claude-next auto` — a headless orchestrator that rotates windows on its own (no human needed) by driving Claude Code via JSON-stdio, auto-invoking /next at turn/budget caps, and respawning with 继续 <SLOT>.",
   "keywords": [
     "claude",
     "claude-code",
@@ -10,10 +10,13 @@
     "session-handoff",
     "context-management",
     "agent",
+    "autonomous-agent",
     "ai-coding",
     "developer-tools",
     "llm",
-    "memory-bank"
+    "memory-bank",
+    "auto-continue",
+    "long-running-agent"
   ],
   "homepage": "https://github.com/llmapi-pro/claude-next#readme",
   "repository": {
@@ -30,6 +33,7 @@
   },
   "files": [
     "bin/",
+    "lib/",
     "scripts/",
     "templates/",
     "SKILL.md",

@@ -48,6 +48,43 @@ Steps 3-4 exist because **old Claude writing its own handoff produces self-congr
 - **Old window**: `/next` — produces a structured handoff, spawns a fresh-context subagent to audit every claim against the filesystem, gives you a short pass-phrase (`continue A`).
 - **New window**: paste the pass-phrase as the first message. A `UserPromptSubmit` hook intercepts, re-verifies the handoff is still current (git HEAD / cwd / age), and injects it as context. The new Claude starts fully oriented.
 
+---
+
+## v0.2: `claude-next auto` — hands-free rotating loop
+
+If you want Claude Code to just keep **working on a long task by itself**, rotating windows at every checkpoint with no human in the loop, run:
+
+```bash
+npx claude-next auto "Implement feature X and its tests until [DONE]"
+```
+
+What this does:
+
+1. Spawns Claude Code as a child process in its headless JSON-stdio mode (`--print --input-format stream-json --output-format stream-json`).
+2. Feeds the task prompt plus a preamble that teaches the child to emit `[ROTATE]` at natural checkpoints and `[DONE]` when the overall task is complete.
+3. Watches for rotation triggers: turn count, per-window cost cap, cumulative cost cap, or an explicit `[ROTATE]` marker.
+4. On rotate: sends `/next` to the child, waits for the handoff slot's audit to finish, kills the child, and spawns a fresh one with `继续 <SLOT>` as its first message.
+5. Stops when the child emits `[DONE]`, or the total budget is exhausted, or you touch the sentinel file `~/.claude/next/auto.stop` (or hit Ctrl-C).
+
+All windows in a single run share a structured log under `~/.claude/next/auto-sessions/<timestamp>/` (`main.log`, `events.jsonl`, `summary.json`).
+
+```bash
+# common flags
+npx claude-next auto "<task>" \
+  --max-turns-per-window 30 \
+  --window-budget-usd 2 \
+  --total-budget-usd 20 \
+  --max-windows 20
+
+npx claude-next auto --status      # inspect last run
+npx claude-next auto --stop        # ask the running loop to stop at next tick
+npx claude-next auto --dry-run "task"  # show what would be sent, don't spawn
+```
+
+Requires the local `claude` CLI on `PATH`. Override with `--claude-bin` or `CLAUDE_BIN`.
+
+The child runs with `--permission-mode bypassPermissions` by default — only run `auto` in project directories you trust.
+
 You never write a summary yourself. You never ask "does this match reality" — the audit already did.
 
 ---
@@ -290,18 +327,6 @@ npx claude-next install
 |---|---|---|
 | 载入 | `continue A` / `next A` | `继续 A` |
 | 删除 | `drop A` | `移除 A` |
-
----
-
-## Related Projects
-
-From the same maintainer:
-
-- [llmapi-pro/claude-code-setup](https://github.com/llmapi-pro/claude-code-setup) — One-line installer for Claude Code with a Claude-compatible relay backend.
-- [llmapi-pro/claude-md-templates](https://github.com/llmapi-pro/claude-md-templates) — Drop-in `CLAUDE.md` templates for popular stacks (Next.js, FastAPI, Express+TS, Go).
-- [llmapi-pro/awesome-claude-code-china](https://github.com/llmapi-pro/awesome-claude-code-china) — Curated Claude Code resources for Chinese developers (tutorials, mirror services, tools).
-
-For the backend that powers the default install, see [llmapi.pro](https://llmapi.pro).
 
 ---
 

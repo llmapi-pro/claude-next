@@ -3,6 +3,143 @@
 All notable changes to this project will be documented in this file.
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [0.2.3] - 2026-05-01
+
+### Fixed — `/next` skill (manual path) — three user-reported regressions in deep sessions
+
+- **Pass-phrase `continue <SLOT>` now works.** The English alias was documented
+  in the v0.1 README, CHANGELOG, and CLI help, but the hook regex only matched
+  `继续` and `next`. Pasting `continue A` as the first message in a new window
+  silently fell through to a normal user prompt with no handoff injection — so
+  the new window opened with no orientation message at all. Fixed by adding
+  `continue` (case-insensitive) to the regex.
+- **Pass-phrase regex is no longer trigger-happy.** Previously `next step is to
+  fix the auth bug`, `next time we should ...`, or `drop table users` (anyone
+  pasting SQL into a fresh window) were parsed as `slot=STEP / TIME / TABLE`
+  and the user's real first message was replaced with a "slot does not exist"
+  hook message. The regex now requires a 1-3-letter slot followed by a word
+  boundary (end-of-string, whitespace, or punctuation), eliminating the
+  false-positive class entirely.
+- **Ingest gates on `audit_status`.** A handoff that was written but whose
+  step-4 subagent audit never completed (because the producing window crashed,
+  was closed, or the user interrupted) was being consumed silently and
+  injected into the new window as if it had passed audit. The hook now reads
+  `audit_status` before consuming and surfaces explicit warnings for
+  `pending` / `in_progress` / `aborted` / `failed`, so the new window's
+  Claude leads with the truth ("this handoff did not pass the quality gate")
+  instead of trusting unverified claims.
+- **Step 1 no longer hangs the turn.** SKILL.md previously said "wait for user
+  response" and "3 seconds without objection — proceed" after announcing the
+  identified task. Claude Code has no 3-second timer, so the LLM ended its
+  turn and waited forever for the user to type "continue", which felt like
+  `/next` had hung. The new wording explicitly tells the LLM to keep going;
+  if the user got an incorrect identification, they correct it on the next
+  turn (which now also includes a pointer to `remove.sh <SLOT>` to undo the
+  draft cleanly).
+- **Step 4 no longer relies on LLM self-stitching.** Previously the producing
+  LLM had to (a) `cat >>` the audit text into the handoff, (b) hand-edit the
+  frontmatter `audit_status` line, and (c) print the result-report block.
+  In deep contexts any of those three steps could be skipped, garbled by
+  shell escaping, or completed without the others — leaving handoffs in
+  inconsistent states (file says `pending` but Pass A is in the body, or
+  Pass A missing but frontmatter says `passed`). The audit subagent now
+  **Write**s its output to `<SLOT>.audit-passA.md`, and a new shell script
+  `scripts/audit-finalize.sh` does the file mutation atomically and prints
+  the verdict back. The LLM only has to read one string.
+
+### Added
+
+- **`scripts/audit-finalize.sh`** — atomic finalizer for handoff audit. Takes
+  `<SLOT> <PASS_A_FILE>` and rewrites frontmatter + appends Pass A in one
+  shot, or `<SLOT> --aborted` when the audit subagent didn't return cleanly.
+- **`audit_status: aborted`** as a first-class verdict, distinct from
+  `pending` (step 4 was skipped entirely) and from `failed` (audit ran and
+  found verified-fictitious claims).
+- **`/next list` now flags stale audit state.** If frontmatter says
+  passed/warnings/failed but the file body has no `## Audit — Pass A`
+  section, the listing shows `audit: <verdict> (stale: no Pass A section in
+  body)` so users can tell something went wrong.
+- **`install.sh` self-test** for the `next step is to ...` false-positive
+  guard, so future regex regressions get caught at install time.
+
+### Changed
+
+- **`install.sh` idempotency** is now substring-based on
+  `next/scripts/ingest.sh` rather than exact string equality on the hook
+  command. Users who tweaked the cmd (added `2>/dev/null`, alternate path
+  expansion, etc.) no longer get duplicate hook registrations on re-install.
+- **Auto-mode (`claude-next auto`) `waitForNewHandoff`** now distinguishes
+  "file never appeared" from "file appeared but audit never finished". In
+  the second case it resolves with `verdict='aborted'` after the timeout
+  rather than rejecting with a generic timeout error, so the orchestrator
+  can still load the (unaudited) handoff and let the consuming window warn
+  the user, instead of failing the whole loop.
+
+### Compatibility
+
+- All v0.1 / v0.2.x pass-phrases (`继续 A`, `next A`, `移除 A`, `drop A`)
+  continue to work unchanged. `continue A` is now an additional accepted
+  alias, matching what the docs always said.
+- Existing pending handoffs with `audit_status: passed/warnings/failed` are
+  fully compatible. Handoffs with `audit_status: pending` will now produce
+  a loud warning in the consuming window — this is the intended behavior.
+- No breaking changes to `claude-next auto`'s public CLI flags.
+
+## [0.2.2] - 2026-04-24
+
+### Fixed
+- Auto loop process could stay alive for up to 30 minutes after the logical
+  loop finished writing its summary. The safety-net `setTimeout` and the
+  poll `setInterval` in `waitForDecision` were never cleared, keeping the
+  Node event loop busy. Both are now cleared on finish and additionally
+  `.unref()`-ed so they can't hold the process open. The outer `runAuto`
+  also calls `process.exit(0)` once the summary is flushed, which matters
+  for shell orchestrators that `wait` on the child PID.
+
+## [0.2.1] - 2026-04-24
+
+### Fixed
+- Auto loop could time out waiting for handoff when the `/next` skill paused
+  for its "3 seconds / no objection" user-confirmation gate. The driver now
+  sends an auto-confirm `继续` message at +8 s and +60 s after `/next`, and
+  extends the handoff-wait timeout from 180 s to 300 s.
+- Cosmetic: replaced non-ASCII ellipsis in a log string that could trip
+  `set -u` consumers on restricted locales.
+
+## [0.2.0] - 2026-04-24
+
+### Added
+- **`claude-next auto "<task>"`** — autonomous rotating loop with zero human
+  intervention between windows.
+  - Spawns Claude Code as a child via `claude --print --input-format stream-json
+    --output-format stream-json`, feeding user turns as NDJSON and reading
+    assistant / result events back.
+  - Watches for rotation triggers: turn count, per-window cost cap,
+    cumulative cost cap, or explicit `[ROTATE]` / `[DONE]` markers in the
+    assistant's output.
+  - On rotate: sends `/next` to the current child, waits for the new handoff
+    file to appear and its `audit_status` to flip from `pending`, kills the
+    child, and spawns a fresh one with `继续 <SLOT>` as its first message.
+  - Structured session logs under `~/.claude/next/auto-sessions/<stamp>/`
+    (`main.log`, `events.jsonl`, `summary.json`).
+  - Graceful stop via SIGINT/SIGTERM or the sentinel file
+    `~/.claude/next/auto.stop`.
+  - Zero additional runtime dependencies — pure Node stdlib, same as v0.1.
+- `claude-next auto --status` / `claude-next auto --stop` / `--dry-run` helpers.
+- Embedded preamble instructs the child Claude to emit `[ROTATE]` at natural
+  checkpoints and `[DONE]` when the overall task is complete.
+- New library modules under `lib/`: `auto.js`, `driver.js`, `rotator.js`,
+  `handoff-wait.js`, `logger.js`, `slot.js`.
+
+### Notes
+- Requires the local `claude` CLI (Claude Code) on `PATH`. Override with
+  `--claude-bin` or the `CLAUDE_BIN` env var.
+- Recommended to pair `auto` with `--dangerously-skip-permissions` only in
+  sandboxed project directories. The loop defaults to
+  `--permission-mode bypassPermissions` for the child process.
+- The loop reuses the existing `/next` skill for handoffs, so audit gating from
+  v0.1 applies inside the loop as well.
+
 ## [0.1.0] - 2026-04-24
 
 ### Added
@@ -23,4 +160,8 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 - Single-user, single-machine — handoffs are local files, no sync.
 - Pass-phrase patterns currently hard-coded to `continue|next|继续` and `drop|移除`.
 
+[0.2.3]: https://github.com/llmapi-pro/claude-next/releases/tag/v0.2.3
+[0.2.2]: https://github.com/llmapi-pro/claude-next/releases/tag/v0.2.2
+[0.2.1]: https://github.com/llmapi-pro/claude-next/releases/tag/v0.2.1
+[0.2.0]: https://github.com/llmapi-pro/claude-next/releases/tag/v0.2.0
 [0.1.0]: https://github.com/llmapi-pro/claude-next/releases/tag/v0.1.0
