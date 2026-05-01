@@ -49,12 +49,23 @@ else
   fi
   pass_a_block="$(cat "$src")"
 
-  # Extract verdict. Look for a `- passed` / `- warnings` / `- failed` line
-  # under the `### Verdict` heading. Fall back to first occurrence anywhere.
+  # Extract verdict. Prefer the line under `### Verdict`, fall back to the
+  # first verdict word anywhere in the file. Implementation uses POSIX awk
+  # (no gawk-only `match($0, re, arr)` array form — that fails silently with
+  # noisy stderr on macOS BSD awk) and grep -E for the fallback.
   verdict="$(awk '
     /^### Verdict/ { in_verdict=1; next }
     /^### / && in_verdict { exit }
-    in_verdict && match($0, /(passed|warnings|failed)/, m) { print m[1]; exit }
+    in_verdict && /(passed|warnings|failed)/ {
+      line = $0
+      gsub(/[^a-z]+/, " ", line)
+      n = split(line, parts, " ")
+      for (i = 1; i <= n; i++) {
+        if (parts[i] == "passed" || parts[i] == "warnings" || parts[i] == "failed") {
+          print parts[i]; exit
+        }
+      }
+    }
   ' "$src" 2>/dev/null)"
   if [ -z "$verdict" ]; then
     verdict="$(grep -oE '\b(passed|warnings|failed)\b' "$src" 2>/dev/null | head -1)"
@@ -64,8 +75,13 @@ else
   fi
 fi
 
-# Atomic-ish update: write to a tempfile then mv.
-tmp="$(mktemp -t next-final.XXXXXX 2>/dev/null || echo "/tmp/next-final.$$.md")"
+# Atomic update: write to a tempfile in the SAME directory as the target,
+# then mv. Same-fs is required for mv to be atomic on POSIX. The previous
+# `mktemp -t` form put the tempfile in /tmp, which is a different filesystem
+# from ~/.claude/next/pending on most Linux installs (tmpfs vs the home fs)
+# — that made the mv a copy+unlink, briefly leaving the file half-written.
+tgt_dir="$(dirname "$f")"
+tmp="$(mktemp "$tgt_dir/.next-final.XXXXXX" 2>/dev/null || echo "$tgt_dir/.next-final.$$.md")"
 
 # 1. Rewrite frontmatter audit_status line (and only that line).
 awk -v v="$verdict" '

@@ -214,6 +214,8 @@ For every claim — "I pushed image X", "commit `abc123` contains the fix", "fil
 - `passed` — all claims verified, ≥3 uncertainties
 - `warnings` — 1-2 ⚠️ minor discrepancies, worth noting
 - `failed` — ❌ verified fiction, or <3 uncertainties (you get to rewrite)
+- `aborted` — the audit subagent never returned cleanly (crashed, timed out, or the producing window was killed before audit-finalize ran). The handoff is still loadable but treat every claim as unverified.
+- `pending` / `in_progress` / `writing` — should not be visible in normal use; if you see one, the producing window died at step 4 before the audit started or finished. The new window will lead with a loud warning.
 
 Because the auditor is fresh, it catches exactly the class of error that long-context self-summarization produces: the claim "I deployed it" when the deploy actually failed and was forgotten 50 turns ago.
 

@@ -3,6 +3,74 @@
 All notable changes to this project will be documented in this file.
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [0.2.4] - 2026-05-01
+
+### Fixed — proactive bug-hunt sweep (no user reports yet, found by code audit)
+
+- **`<SLOT>.audit-passA.md` no longer pollutes the slot list.** v0.2.3 introduced
+  the audit subagent writing its result to `<SLOT>.audit-passA.md` in the same
+  pending dir, then `audit-finalize.sh` consuming it. Both `lib/slot.js
+  listUsedSlots` (`f.endsWith('.md')`) and `scripts/common.sh slots_used`
+  (sed-only filter) treated `<SLOT>.audit-passA.md` as a real slot file. In
+  the crash window where the producing window dies between the subagent's
+  Write and audit-finalize.sh's consume, the file is left behind and gets
+  visited by `waitForNewHandoff`, which can resolve with `slot='X.audit-passA'`
+  and prompt the next window with `继续 X.audit-passA`. Filter is now a
+  strict regex `^[A-Z]{1,3}\.md$` in both implementations, so only real
+  handoffs ever appear.
+
+- **Frontmatter parsing handles CRLF.** Both `lib/handoff-wait.js
+  readAuditStatus` (used by auto-mode) and `scripts/common.sh
+  frontmatter_get` (used by ingest, list, validity) parsed the YAML
+  frontmatter as if it were always LF-terminated. A handoff saved in a
+  Windows editor or checked out with `git config core.autocrlf=true` has
+  CRLF line endings; the regex `^---\n` fails to match `---\r\n`, so every
+  frontmatter key silently returned empty. For auto mode this caused
+  `audit_status` to be reported as `pending` forever and the loop to wait
+  out the full 5-minute timeout on every rotation. Both implementations
+  now strip `\r` before parsing.
+
+- **Rotator markers no longer fire on substring matches in prose.** The
+  marker set used to include the bare Chinese phrases `任务完成` (`task
+  complete`) and `需要换窗` (`need to switch windows`) — both common things
+  for a Chinese-speaking child to write inside an explanation, e.g.
+  `任务完成第一阶段，开始第二阶段` would instantly stop the entire auto
+  loop. The marker matcher also accepted any substring inside a longer
+  line. Two changes: (a) the ambiguous Chinese phrases are removed
+  entirely; (b) markers must now appear **alone on their own line** (after
+  trim) — the same false-positive class fixed for the `next step is to ...`
+  pass-phrase regex in 0.2.3. Bracket markers (`[ROTATE]`, `[DONE]`,
+  `[HANDOFF]`, `[TASK_COMPLETE]`, `<...>` variants, and `ALL_DONE`) are
+  retained because they require explicit emission. The PREAMBLE the
+  orchestrator injects into the child Claude is updated to spell out the
+  on-its-own-line contract so the child knows it can safely mention the
+  markers in prose without triggering them.
+
+### Improved
+
+- **`audit-finalize.sh` is fully POSIX awk** (no gawk-only `match($0, re,
+  arr)` array form). The previous code worked everywhere but emitted a
+  syntax error to stderr on macOS BSD awk, then silently fell back to the
+  grep path — noisy logs that looked alarming but weren't. The new awk is
+  pure POSIX and quiet on every platform.
+- **`audit-finalize.sh` writes its tempfile in the target directory**, not
+  `/tmp`, so the `mv tmp final` step is always atomic on POSIX (same-fs
+  rename) instead of degrading to copy+unlink across `tmpfs → ext4`.
+- **README documents `aborted` and the transient `pending` /
+  `in_progress` / `writing` audit states**, which 0.2.3 introduced but
+  didn't explain. Users encountering the new ABORTED warning on a handoff
+  will now find an explanation directly under "How the audit works".
+
+### Compatibility
+
+- All v0.1 / v0.2.x pass-phrases continue to work unchanged.
+- Existing handoffs from any version remain loadable; CRLF handoffs that
+  used to look "stuck" in auto mode will now load on the first poll.
+- One marker-set change: assistants in the auto loop that relied on the
+  bare phrases `任务完成` or `需要换窗` to signal rotate/done need to use
+  the bracketed forms (`[ROTATE]` / `[DONE]`) on their own line instead.
+  This is also documented in the updated PREAMBLE.
+
 ## [0.2.3] - 2026-05-01
 
 ### Fixed — `/next` skill (manual path) — three user-reported regressions in deep sessions
@@ -160,6 +228,7 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 - Single-user, single-machine — handoffs are local files, no sync.
 - Pass-phrase patterns currently hard-coded to `continue|next|继续` and `drop|移除`.
 
+[0.2.4]: https://github.com/llmapi-pro/claude-next/releases/tag/v0.2.4
 [0.2.3]: https://github.com/llmapi-pro/claude-next/releases/tag/v0.2.3
 [0.2.2]: https://github.com/llmapi-pro/claude-next/releases/tag/v0.2.2
 [0.2.1]: https://github.com/llmapi-pro/claude-next/releases/tag/v0.2.1

@@ -41,8 +41,14 @@ json_emit_context() {
 }
 
 slots_used() {
+  # A handoff is `<UPPERCASE LETTERS>.md`. Anything else in the pending dir
+  # (e.g. `<SLOT>.audit-passA.md` left briefly by the audit subagent before
+  # audit-finalize.sh consumes it) is filtered out — it must not be reported
+  # as a slot. The basename grep is the boundary; sed only strips `.md`.
   find "$NEXT_PENDING_DIR" -maxdepth 1 -name '*.md' -type f 2>/dev/null \
-    | sed -E 's#.*/([A-Z]+)\.md$#\1#' \
+    | sed -E 's#.*/##' \
+    | grep -E '^[A-Z]{1,3}\.md$' \
+    | sed -E 's#\.md$##' \
     | sort
 }
 
@@ -52,7 +58,11 @@ slot_file() {
 
 frontmatter_get() {
   # $1 = file, $2 = key
+  # Strips trailing \r so a CRLF-saved handoff (Windows editor / git autocrlf)
+  # parses identically to LF. Without this strip, `^---$` never matches the
+  # opening fence on CRLF files and every key returns empty silently.
   awk -v k="$2" '
+    { sub(/\r$/, "") }
     BEGIN{infm=0}
     /^---$/ { infm=!infm; next }
     infm && $0 ~ "^" k ":" { sub("^" k ":[ \t]*",""); print; exit }

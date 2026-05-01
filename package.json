@@ -1,6 +1,6 @@
 {
   "name": "claude-next",
-  "version": "0.2.3",
+  "version": "0.2.4",
   "description": "Handoff + autonomous rotation for deep Claude Code sessions. v0.1 adds /next pass-phrase handoffs with fresh-context audit; v0.2 adds `claude-next auto` — a headless orchestrator that rotates windows on its own (no human needed) by driving Claude Code via JSON-stdio, auto-invoking /next at turn/budget caps, and respawning with 继续 <SLOT>.",
   "keywords": [
     "claude",
