@@ -3,6 +3,49 @@
 All notable changes to this project will be documented in this file.
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [0.2.5] - 2026-05-01
+
+### Fixed — second proactive sweep (no user reports)
+
+- **`NEXT_PENDING_DIR` env override now actually works.** README's
+  configuration table promised it as an independently-overridable env var,
+  but `scripts/common.sh` unconditionally clobbered any caller value with
+  `NEXT_HOME/pending`. Now uses the `:-` default form. The JS lib
+  (`lib/slot.js PENDING_DIR`) honors the same env var so auto-mode looks
+  in the same place the shell scripts write to.
+- **`claude-next auto --resume <SLOT>` actually resumes from the named
+  handoff.** The flag was parsed and logged but the first window's prompt
+  was hard-coded to `PREAMBLE + initialPrompt`, which ignored the handoff
+  entirely. `--resume` only kicked in on the second window after a mid-loop
+  rotate — i.e. it was a no-op for its actual use case. Fixed: when
+  `--resume X` is set, the first window starts with `继续 X` as its prompt.
+
+### Improved
+
+- **`driver._buffer` now has a 10MB sanity cap.** Previously the NDJSON
+  line buffer grew unbounded if the child Claude process ever emitted
+  output without a trailing newline (hung child, broken protocol). Beyond
+  10MB the buffer is dropped and an `error` event fires so the
+  orchestrator can react.
+- **`scripts/ingest.sh` honors `NEXT_DEBUG=1`** for a one-line trace per
+  invocation written to `~/.claude/next/ingest.debug.log`. By design the
+  hook never prints to the user terminal (it would corrupt every prompt),
+  so this log is the only way to diagnose why a pass-phrase took (or
+  didn't take) a code path. Off by default; zero overhead when unset.
+- **`SessionLogger.log()` writes to stderr instead of stdout.** Auto-mode
+  writes the child Claude's assistant text to stdout for the human (or
+  downstream pipeline) to read; orchestrator meta-logs were going to the
+  same stream and interleaving mid-line. Now stdout is purely the child's
+  voice and stderr is purely the orchestrator's. `events.jsonl` /
+  `main.log` / `summary.json` on disk are unchanged.
+
+### Compatibility
+
+- Pure additive — every existing call path still works. Anyone relying on
+  orchestrator log lines reaching stdout should switch to reading
+  `~/.claude/next/auto-sessions/<stamp>/main.log` (which has always been
+  the source of truth).
+
 ## [0.2.4] - 2026-05-01
 
 ### Fixed — proactive bug-hunt sweep (no user reports yet, found by code audit)
@@ -228,6 +271,7 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 - Single-user, single-machine — handoffs are local files, no sync.
 - Pass-phrase patterns currently hard-coded to `continue|next|继续` and `drop|移除`.
 
+[0.2.5]: https://github.com/llmapi-pro/claude-next/releases/tag/v0.2.5
 [0.2.4]: https://github.com/llmapi-pro/claude-next/releases/tag/v0.2.4
 [0.2.3]: https://github.com/llmapi-pro/claude-next/releases/tag/v0.2.3
 [0.2.2]: https://github.com/llmapi-pro/claude-next/releases/tag/v0.2.2

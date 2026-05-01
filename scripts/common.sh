@@ -6,7 +6,10 @@ set -u
 
 NEXT_HOME="${NEXT_HOME:-$HOME/.claude/next}"
 NEXT_SKILL_HOME="${NEXT_SKILL_HOME:-$HOME/.claude/skills/next}"
-NEXT_PENDING_DIR="$NEXT_HOME/pending"
+# README documents NEXT_PENDING_DIR as an independently-overridable env var.
+# Use the `:-` default form so `NEXT_PENDING_DIR=/x bash list.sh` actually
+# works; previously the assignment unconditionally clobbered any caller value.
+NEXT_PENDING_DIR="${NEXT_PENDING_DIR:-$NEXT_HOME/pending}"
 NEXT_MIN_UNK="${NEXT_MIN_UNK:-3}"
 
 mkdir -p "$NEXT_PENDING_DIR"

@@ -8,11 +8,23 @@
 # Otherwise → silent passthrough (exit 0, no output).
 #
 # CRITICAL: this script MUST never break a normal CC session. Any error → silent exit 0.
+#
+# Debugging: set NEXT_DEBUG=1 to write a one-line trace per invocation to
+#   ~/.claude/next/ingest.debug.log
+# This is the ONLY way to see why the hook took (or didn't take) a path,
+# since by design it never prints to the user terminal.
 set -u
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
+_next_debug() {
+  [ "${NEXT_DEBUG:-0}" = "1" ] || return 0
+  local logfile="${NEXT_HOME:-$HOME/.claude/next}/ingest.debug.log"
+  mkdir -p "$(dirname "$logfile")" 2>/dev/null || true
+  printf '%s  %s\n' "$(date -u +%FT%TZ)" "$*" >> "$logfile" 2>/dev/null || true
+}
+
 {
-  . "$SCRIPT_DIR/common.sh" 2>/dev/null || exit 0
+  . "$SCRIPT_DIR/common.sh" 2>/dev/null || { _next_debug "common.sh source failed"; exit 0; }
 
   input="$(cat)"
   [ -z "$input" ] && exit 0
@@ -37,11 +49,14 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
     action="remove"
     slot="$(printf '%s' "${BASH_REMATCH[2]}" | tr '[:lower:]' '[:upper:]')"
   else
+    _next_debug "no match (silent passthrough)"
     exit 0
   fi
+  _next_debug "matched action=$action slot=$slot"
 
   f="$(slot_file "$slot")"
   if [ ! -f "$f" ]; then
+    _next_debug "slot $slot file not found at $f"
     # Don't echo the entire prompt back (could be long / contain secrets).
     ctx="[next skill] handoff slot $slot does not exist (already consumed, or never produced).
 Tell the user to run  /next list  to see available slots."
@@ -56,6 +71,7 @@ Tell the user to run  /next list  to see available slots."
       flag && NF && !/^</ {print; exit}
     ' "$f")"
     rm -f "$f"
+    _next_debug "removed slot=$slot"
     ctx="[next skill] User asked to remove handoff $slot (task: ${task:-unlabeled}). The handoff has been deleted.
 Please briefly confirm: \"removed $slot\". Do not load any handoff content and do not assume the user wants to continue — they explicitly said remove."
     printf '%s' "$ctx" | json_emit_context
@@ -116,7 +132,8 @@ Your job:
 $body
 === HANDOFF END ==="
 
+  _next_debug "consumed slot=$slot audit=$audit_status"
   printf '%s' "$ctx" | json_emit_context
   exit 0
 
-} 2>/dev/null || exit 0
+} 2>/dev/null || { _next_debug "outer block crashed (silenced)"; exit 0; }
