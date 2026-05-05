@@ -6,18 +6,18 @@ set -u
 
 NEXT_HOME="${NEXT_HOME:-$HOME/.claude/next}"
 NEXT_SKILL_HOME="${NEXT_SKILL_HOME:-$HOME/.claude/skills/next}"
-# README documents NEXT_PENDING_DIR as an independently-overridable env var.
-# Use the `:-` default form so `NEXT_PENDING_DIR=/x bash list.sh` actually
-# works; previously the assignment unconditionally clobbered any caller value.
-NEXT_PENDING_DIR="${NEXT_PENDING_DIR:-$NEXT_HOME/pending}"
+NEXT_PENDING_DIR="$NEXT_HOME/pending"
 NEXT_MIN_UNK="${NEXT_MIN_UNK:-3}"
 
 mkdir -p "$NEXT_PENDING_DIR"
 
 # Extract a top-level key from JSON on stdin. Usage: json_get prompt <<<"$input"
+# UTF-8: stdin is raw UTF-8 bytes (decode_json expects byte stream), stdout
+# emits wide chars via :utf8 layer so Chinese / emoji values survive intact.
 json_get() {
   local key="$1"
   perl -MJSON::PP -e '
+    binmode STDOUT, ":encoding(UTF-8)";
     my $k = shift;
     my $in = do { local $/; <STDIN> };
     my $d = eval { decode_json($in) };
@@ -28,10 +28,19 @@ json_get() {
 }
 
 # Emit UserPromptSubmit hook JSON to stdout with additionalContext from arg or stdin.
+# UTF-8 contract:
+#   - stdin layer  :encoding(UTF-8) — decode incoming bytes to wide chars so
+#     encode_json sees codepoints (e.g. 口 = U+53E3) instead of raw byte values
+#     (which it would interpret as Latin-1 codepoints and double-encode).
+#   - stdout       NO binmode — JSON::PP encode_json defaults to utf8(1) and
+#     already emits UTF-8 byte sequences. Adding a :utf8 stdout layer would
+#     re-encode those bytes, producing mojibake (e5 → c3 a5) and breaking
+#     Claude Code's hook reader with "Failed with non-blocking status code".
 json_emit_context() {
   local ctx="${1:-}"
   if [ -z "$ctx" ]; then ctx="$(cat)"; fi
   printf '%s' "$ctx" | perl -MJSON::PP -e '
+    binmode STDIN, ":encoding(UTF-8)";
     my $ctx = do { local $/; <STDIN> };
     my $out = {
       hookSpecificOutput => {
@@ -44,14 +53,8 @@ json_emit_context() {
 }
 
 slots_used() {
-  # A handoff is `<UPPERCASE LETTERS>.md`. Anything else in the pending dir
-  # (e.g. `<SLOT>.audit-passA.md` left briefly by the audit subagent before
-  # audit-finalize.sh consumes it) is filtered out — it must not be reported
-  # as a slot. The basename grep is the boundary; sed only strips `.md`.
   find "$NEXT_PENDING_DIR" -maxdepth 1 -name '*.md' -type f 2>/dev/null \
-    | sed -E 's#.*/##' \
-    | grep -E '^[A-Z]{1,3}\.md$' \
-    | sed -E 's#\.md$##' \
+    | sed -E 's#.*/([A-Z]+)\.md$#\1#' \
     | sort
 }
 
@@ -61,11 +64,7 @@ slot_file() {
 
 frontmatter_get() {
   # $1 = file, $2 = key
-  # Strips trailing \r so a CRLF-saved handoff (Windows editor / git autocrlf)
-  # parses identically to LF. Without this strip, `^---$` never matches the
-  # opening fence on CRLF files and every key returns empty silently.
   awk -v k="$2" '
-    { sub(/\r$/, "") }
     BEGIN{infm=0}
     /^---$/ { infm=!infm; next }
     infm && $0 ~ "^" k ":" { sub("^" k ":[ \t]*",""); print; exit }
