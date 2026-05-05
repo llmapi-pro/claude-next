@@ -3,6 +3,43 @@
 All notable changes to this project will be documented in this file.
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [0.2.6] - 2026-05-05
+
+### Fixed — non-ASCII pass-phrase regression (reported via #2)
+
+- **UTF-8 round-trip in JSON helpers.** `scripts/common.sh json_emit_context`
+  and `json_get` layered `:encoding(UTF-8)` on both STDIN and STDOUT around
+  Perl's JSON::PP, which already emits UTF-8 byte sequences from
+  `encode_json`. Every byte was re-interpreted as Latin-1 and re-encoded —
+  e.g. `e5 8f a3` (口) became `c3 a5 c2 8f c2 a3` mojibake. The hook output
+  was invalid UTF-8, Claude Code rejected it with the cryptic
+  "UserPromptSubmit hook error: Failed with non-blocking status code: No
+  stderr output", and the matching handoff was already consumed by
+  `rm -f $f` → silent data loss for users with Chinese/emoji prompts.
+  Fix: keep `binmode STDIN` only on `json_emit_context` (decode bytes →
+  wide chars before encode_json sees them) and only `binmode STDOUT` on
+  `json_get` (decode_json wants raw bytes). Verified end-to-end with
+  `继续 ZZZ` and `测试 中文 emoji 🎉` round-trips.
+- **Bash variable-name lexer eats high-bit bytes after `$slot`.** Found
+  while debugging the UTF-8 bug. The context template `已粘贴口令续接 handoff $slot。`
+  put the Chinese full stop `。` (U+3002 = `e3 80 82`) immediately after a
+  bare `$slot`. Bash's identifier lexer absorbed the high-bit bytes as if
+  they were valid identifier chars, expanded `${slot。}` (unset under
+  `set -u`) → exit 1 → handoff already deleted by line 63 → silent loss.
+  The outer `} 2>/dev/null || exit 0` wrapper swallowed the actual
+  `unbound variable: slot�` diagnostic. Fix: brace-quote every
+  `${slot}` / `${trimmed}` / `${body}` reference in the context templates.
+  Pure-ASCII users were never affected (no high-bit bytes after the
+  variable = no absorption).
+
+### Compatibility
+
+- Pure-ASCII pass-phrases (`continue A`, `next A`, `drop A`) behaved
+  identically before and after these fixes — anyone unaffected by the
+  Chinese-byte bugs sees no behavior change. Upgrading is recommended for
+  any user who has ever pasted a Chinese pass-phrase, since the silent
+  data-loss path can consume a handoff without injecting it.
+
 ## [0.2.5] - 2026-05-01
 
 ### Fixed — second proactive sweep (no user reports)
@@ -271,6 +308,7 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 - Single-user, single-machine — handoffs are local files, no sync.
 - Pass-phrase patterns currently hard-coded to `continue|next|继续` and `drop|移除`.
 
+[0.2.6]: https://github.com/llmapi-pro/claude-next/releases/tag/v0.2.6
 [0.2.5]: https://github.com/llmapi-pro/claude-next/releases/tag/v0.2.5
 [0.2.4]: https://github.com/llmapi-pro/claude-next/releases/tag/v0.2.4
 [0.2.3]: https://github.com/llmapi-pro/claude-next/releases/tag/v0.2.3
