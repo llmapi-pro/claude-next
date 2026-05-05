@@ -48,15 +48,15 @@ if [ -n "$git_head" ] && [ "$git_head" != "(not-a-repo)" ] && [ -n "$project_roo
       oks+=("git HEAD 未变 ($short_cur)")
     else
       if git -C "$project_root" merge-base --is-ancestor "$git_head" "$cur_head" 2>/dev/null; then
-        warnings+=("ℹ️ git HEAD 已前进 $short_old → $short_cur（老 commit 仍在祖先链；注意新改动）")
+        warnings+=("ℹ️ git HEAD 已前进 ${short_old} → ${short_cur}（老 commit 仍在祖先链；注意新改动）")
       else
-        warnings+=("⚠️ git HEAD 变化且非快进 $short_old → $short_cur（rebase/reset？handoff 可能失配）")
+        warnings+=("⚠️ git HEAD 变化且非快进 ${short_old} → ${short_cur}（rebase/reset？handoff 可能失配）")
       fi
     fi
 
     cur_branch="$(git -C "$project_root" rev-parse --abbrev-ref HEAD 2>/dev/null || echo "")"
     if [ -n "$git_branch" ] && [ "$git_branch" != "(not-a-repo)" ] && [ -n "$cur_branch" ] && [ "$git_branch" != "$cur_branch" ]; then
-      warnings+=("⚠️ branch 变化：handoff=$git_branch，当前=$cur_branch")
+      warnings+=("⚠️ branch 变化：handoff=${git_branch}，当前=${cur_branch}")
     fi
   fi
 fi

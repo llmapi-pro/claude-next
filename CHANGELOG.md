@@ -3,6 +3,61 @@
 All notable changes to this project will be documented in this file.
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [0.2.7] - 2026-05-05
+
+### Fixed — same-class follow-up sweep after 0.2.6 (举一反三)
+
+The 0.2.6 fix landed in `scripts/common.sh` and `scripts/ingest.sh` only. A
+fresh-context audit found four sibling sites of the same two bug classes that
+the spot fix didn't reach.
+
+- **`scripts/validity.sh` had three unbraced `$var` adjacent to CJK punctuation.**
+  Identical pattern to the `$slot。` regression fixed in 0.2.6:
+  `$short_cur（` (lines 51 and 53) and `$git_branch，` (line 59) all caused
+  bash's identifier lexer to absorb the high-bit bytes of the following
+  Chinese character into the variable name. Under `set -u` (line 5) the
+  resulting unset `${short_cur（...}` / `${git_branch，...}` lookup exited 1,
+  killing the Pass B drift check entirely. Caller in `ingest.sh` swallowed
+  stderr — symptom was a continuation handoff missing its drift section with
+  no diagnostic. Fix: brace-quote `${short_old}` / `${short_cur}` /
+  `${git_branch}` / `${cur_branch}` in all three warning templates.
+- **`install.sh` Perl block double-encoded UTF-8 in `~/.claude/settings.json`
+  on every install / re-install.** Same root cause as the 0.2.6 `common.sh`
+  fix: `<:encoding(UTF-8)` on the input handle pre-decoded bytes to wide
+  chars before `decode_json` (which wants raw bytes); `>:encoding(UTF-8)` on
+  the output handle re-encoded the UTF-8 bytes that `JSON::PP->new->utf8`
+  already produced. Pure-ASCII users were unaffected, but anyone with a
+  Chinese hook label / comment / username path would have seen their
+  settings.json silently corrupted on each `npx claude-next install` run.
+  Fix: drop both `:encoding(UTF-8)` PerlIO layers in both perl blocks
+  (merge + verify) so the pipeline matches `JSON::PP`'s byte-stream contract.
+
+### Added
+
+- **`NEXT_DEBUG=1` trace in `scripts/ingest.sh` is now actually wired up.**
+  The CHANGELOG 0.2.5 entry promised it would tee a one-line trace per
+  invocation to `~/.claude/next/ingest.debug.log`, but the code shipped
+  without the implementation. The 0.2.6 silent-data-loss bug took longer
+  to diagnose specifically because this trace was missing — fixing the
+  documented-but-unimplemented behavior closes that diagnostic gap. Off by
+  default, zero overhead when unset; when set, trace goes to fd 3 instead
+  of stderr so it survives the outer `} 2>/dev/null` swallow that the hook
+  needs to keep the user's prompt safe. Also tees `validity.sh` stderr to
+  the same log when `NEXT_DEBUG=1`, so any future class-A regression in
+  validity.sh surfaces immediately.
+
+### Compatibility
+
+- All fixes are byte-for-byte equivalent for pure-ASCII users with no
+  `NEXT_DEBUG` env var. No behavior change to handoff format, slot
+  allocation, hook registration JSON shape, or auto-mode driver protocol.
+- `~/.claude/settings.json` written by `install.sh` on a pure-ASCII machine
+  is bit-identical before and after this release. Re-running install on a
+  machine where 0.2.6 corrupted it: the corrupted file remains corrupted
+  (this release fixes the producer; it does not auto-repair existing
+  damage). If you suspect prior corruption, restore from one of the
+  `settings.json.bak-*` files install.sh has been backing up since 0.1.0.
+
 ## [0.2.6] - 2026-05-05
 
 ### Fixed — non-ASCII pass-phrase regression (reported via #2)
@@ -308,6 +363,7 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 - Single-user, single-machine — handoffs are local files, no sync.
 - Pass-phrase patterns currently hard-coded to `continue|next|继续` and `drop|移除`.
 
+[0.2.7]: https://github.com/llmapi-pro/claude-next/releases/tag/v0.2.7
 [0.2.6]: https://github.com/llmapi-pro/claude-next/releases/tag/v0.2.6
 [0.2.5]: https://github.com/llmapi-pro/claude-next/releases/tag/v0.2.5
 [0.2.4]: https://github.com/llmapi-pro/claude-next/releases/tag/v0.2.4

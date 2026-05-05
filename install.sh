@@ -59,8 +59,12 @@ use strict; use warnings;
 my $path = $ENV{SETTINGS_PATH};
 my $cmd  = $ENV{HOOK_CMD};
 
-# Slurp file
-open my $fh, "<:encoding(UTF-8)", $path or die "cannot read $path: $!";
+# UTF-8 contract: decode_json wants raw bytes; ->utf8->encode emits raw bytes.
+# DO NOT layer :encoding(UTF-8) on either handle — it would double-encode any
+# non-ASCII byte in the existing settings.json (Chinese hook labels, comments,
+# usernames in paths) into mojibake on every re-install. Same fix as 0.2.6
+# common.sh json_emit_context / json_get.
+open my $fh, "<", $path or die "cannot read $path: $!";
 my $raw = do { local $/; <$fh> };
 close $fh;
 
@@ -94,7 +98,7 @@ if ($already) {
 push @$ups, { hooks => [ { type => "command", command => $cmd } ] };
 
 my $json = JSON::PP->new->utf8->pretty->canonical->encode($s);
-open my $out, ">:encoding(UTF-8)", $path or die "cannot write $path: $!";
+open my $out, ">", $path or die "cannot write $path: $!";
 print $out $json;
 close $out;
 print "  ✓ Hook added.\n";
@@ -107,7 +111,8 @@ echo "[4/5] Verifying..."
 SETTINGS_PATH="$SETTINGS" perl -MJSON::PP -e '
 use strict; use warnings;
 my $path = $ENV{SETTINGS_PATH};
-open my $fh, "<:encoding(UTF-8)", $path or die;
+# Same UTF-8 contract as the merge block above.
+open my $fh, "<", $path or die;
 my $raw = do { local $/; <$fh> };
 close $fh;
 my $s = decode_json($raw);

@@ -9,6 +9,18 @@ set -u
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
 {
+  # NEXT_DEBUG=1 → trace every command + arg + exit to ~/.claude/next/ingest.debug.log.
+  # Documented in CHANGELOG 0.2.5 but never wired up until 0.2.7. Off by default;
+  # zero overhead when unset. Goes to fd 3 instead of stderr so the outer
+  # `} 2>/dev/null` swallow doesn't lose the trace.
+  if [ "${NEXT_DEBUG:-0}" = "1" ]; then
+    mkdir -p "$HOME/.claude/next" 2>/dev/null || true
+    exec 3>>"$HOME/.claude/next/ingest.debug.log"
+    BASH_XTRACEFD=3
+    PS4='+ [$(date -u +%H:%M:%S)] '
+    set -x
+  fi
+
   . "$SCRIPT_DIR/common.sh" 2>/dev/null || exit 0
 
   input="$(cat)"
@@ -54,8 +66,15 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
     exit 0
   fi
 
-  # action=continue: run Pass B (appends to file + prints), then inject whole handoff
-  "$SCRIPT_DIR/validity.sh" "${slot}" >/dev/null 2>&1 || true
+  # action=continue: run Pass B (appends to file + prints), then inject whole handoff.
+  # When NEXT_DEBUG=1, tee validity.sh's stderr to the same debug log so future
+  # validity.sh regressions (the source had three unbraced-$var-before-CJK bugs
+  # fixed in 0.2.7) surface immediately instead of vanishing into 2>&1.
+  if [ "${NEXT_DEBUG:-0}" = "1" ]; then
+    "$SCRIPT_DIR/validity.sh" "${slot}" >>"$HOME/.claude/next/ingest.debug.log" 2>&1 || true
+  else
+    "$SCRIPT_DIR/validity.sh" "${slot}" >/dev/null 2>&1 || true
+  fi
 
   body="$(cat "$f")"
 
