@@ -151,23 +151,69 @@ else
   echo "    $out"
 fi
 
-# Matching prompt with missing slot — should report "slot ZZ does not exist"
-out=$(echo '{"prompt":"continue ZZ","session_id":"test","hook_event_name":"UserPromptSubmit"}' \
+# Matching prompt with missing slot — should fire the hook with the
+# Chinese "槽位 ZZ 不存在" message. Pre-0.2.9 this test used "continue ZZ"
+# but the regex never accepted "continue" (only `next` / `继续`), and
+# greppped for an English "slot ZZ does not exist" message that doesn't
+# exist in the codebase — so the test had been silently failing on every
+# install since 0.1.0. Both halves fixed in 0.2.9.
+out=$(echo '{"prompt":"next ZZ","session_id":"test","hook_event_name":"UserPromptSubmit"}' \
       | bash "$SKILL_DIR/scripts/ingest.sh" 2>/dev/null || true)
-if echo "$out" | grep -q "slot ZZ does not exist"; then
-  echo "  ✓ continue ZZ → informative missing-slot message"
+if echo "$out" | grep -q "槽位 ZZ 不存在"; then
+  echo "  ✓ next ZZ → informative missing-slot message"
 else
-  echo "  ⚠ continue-with-missing-slot test unexpected output:"
+  echo "  ⚠ next-with-missing-slot test unexpected output:"
   echo "    $out" | head -3
 fi
 
-# False-positive guard: 'next step is to fix bug' must NOT trigger
+# Same check via Chinese trigger — covers the 继续 branch of the regex.
+out=$(echo '{"prompt":"继续 ZZ","session_id":"test","hook_event_name":"UserPromptSubmit"}' \
+      | bash "$SKILL_DIR/scripts/ingest.sh" 2>/dev/null || true)
+if echo "$out" | grep -q "槽位 ZZ 不存在"; then
+  echo "  ✓ 继续 ZZ → informative missing-slot message (CN trigger)"
+else
+  echo "  ⚠ 继续-with-missing-slot test unexpected output:"
+  echo "    $out" | head -3
+fi
+
+# False-positive guard: 'next step is to fix bug' must NOT trigger.
+# Pre-0.2.9 this test failed because the unbounded slot regex matched
+# slot=STEP. Fixed in 0.2.9 by capping slot to {1,3} chars + boundary.
 out=$(echo '{"prompt":"next step is to fix the auth bug","session_id":"test","hook_event_name":"UserPromptSubmit"}' \
       | bash "$SKILL_DIR/scripts/ingest.sh" 2>/dev/null || true)
 if [ -z "$out" ]; then
   echo "  ✓ 'next step is...' → silent passthrough (no false positive)"
 else
   echo "  ⚠ 'next step is...' triggered the hook — false positive!"
+fi
+
+# Symmetric guard for the drop / 移除 path.
+out=$(echo '{"prompt":"drop the file is broken","session_id":"test","hook_event_name":"UserPromptSubmit"}' \
+      | bash "$SKILL_DIR/scripts/ingest.sh" 2>/dev/null || true)
+if [ -z "$out" ]; then
+  echo "  ✓ 'drop the file...' → silent passthrough (no false positive)"
+else
+  echo "  ⚠ 'drop the file...' triggered the hook — false positive!"
+fi
+
+# Slot length cap: 'next ABCD' must NOT match (4 chars > SLOT_FILE_RE).
+out=$(echo '{"prompt":"next ABCD please","session_id":"test","hook_event_name":"UserPromptSubmit"}' \
+      | bash "$SKILL_DIR/scripts/ingest.sh" 2>/dev/null || true)
+if [ -z "$out" ]; then
+  echo "  ✓ 'next ABCD...' → silent passthrough (4-char slot rejected)"
+else
+  echo "  ⚠ 'next ABCD...' triggered — slot length cap not honored:"
+  echo "    $out" | head -3
+fi
+
+# Punctuation boundary: 'next A.' should still load (A is valid, . is boundary).
+out=$(echo '{"prompt":"next A.","session_id":"test","hook_event_name":"UserPromptSubmit"}' \
+      | bash "$SKILL_DIR/scripts/ingest.sh" 2>/dev/null || true)
+if echo "$out" | grep -q "槽位 A 不存在"; then
+  echo "  ✓ 'next A.' → loaded (punctuation works as slot boundary)"
+else
+  echo "  ⚠ 'next A.' didn't load — punctuation boundary broken:"
+  echo "    $out" | head -3
 fi
 
 echo ""

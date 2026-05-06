@@ -239,7 +239,7 @@ Match is at the **start** of your first message in a new window:
 | Load handoff | `continue A` or `next A` | `继续 A` |
 | Delete handoff | `drop A` | `移除 A` |
 
-Slot is case-insensitive in the pass-phrase but stored uppercase. You can add any text after the slot (`continue A run tests first`) — Claude sees both.
+Slots are **uppercase only** (1-2 chars: `A`-`Z`, then `AA`-`ZZ`). Lowercase slot characters in the pass-phrase don't trigger the hook — this is deliberate, since `/next` always produces uppercase slots and lowercase ambiguity ("drop a hint" — is `a` a slot or an article?) was the source of every false-positive trigger pre-0.2.9. The trigger keyword (`continue` / `next` / `drop`) remains case-insensitive. You can add any text after the slot (`continue A run tests first`) — Claude sees both.
 
 ---
 

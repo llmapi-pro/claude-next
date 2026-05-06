@@ -49,26 +49,36 @@ else
   fi
   pass_a_block="$(cat "$src")"
 
-  # Extract verdict. Prefer the line under `### Verdict`, fall back to the
-  # first verdict word anywhere in the file. Implementation uses POSIX awk
-  # (no gawk-only `match($0, re, arr)` array form — that fails silently with
-  # noisy stderr on macOS BSD awk) and grep -E for the fallback.
+  # Extract verdict. Prefer a single-token bullet line under `### Verdict`;
+  # fall back to a single-token bullet anywhere in the file as a hedge.
+  #
+  # Why anchor to "single-token bullet" line: templates/audit.rubric.md line 39
+  # documents the verdict format as `- passed | warnings | failed` (the full
+  # set as a separator). Tired auditors literally echo that template line.
+  # Pre-0.2.9 the awk loop scanned the line left-to-right and printed the
+  # first match — always "passed" — silently corrupting audit_status. Anchor
+  # to `^[ws]*[-*][ws]+VERDICT[ws]*$` forces a single-token bullet, which the
+  # rubric line (with " | " separators) cannot satisfy.
+  #
+  # Same anchor on the fallback grep — pre-0.2.9 the unanchored \bVERDICT\b
+  # matched auditor prose like "the test passed before the fix" anywhere in
+  # the file body and stamped that into frontmatter.
+  #
+  # POSIX awk only (no gawk-only `match($0, re, arr)` array form — fails
+  # silently with noisy stderr on macOS BSD awk).
   verdict="$(awk '
     /^### Verdict/ { in_verdict=1; next }
     /^### / && in_verdict { exit }
-    in_verdict && /(passed|warnings|failed)/ {
-      line = $0
-      gsub(/[^a-z]+/, " ", line)
-      n = split(line, parts, " ")
-      for (i = 1; i <= n; i++) {
-        if (parts[i] == "passed" || parts[i] == "warnings" || parts[i] == "failed") {
-          print parts[i]; exit
-        }
-      }
+    in_verdict && /^[[:space:]]*[-*][[:space:]]+(passed|warnings|failed)[[:space:]]*$/ {
+      sub(/^[[:space:]]*[-*][[:space:]]+/, "")
+      sub(/[[:space:]]*$/, "")
+      print; exit
     }
   ' "$src" 2>/dev/null)"
   if [ -z "$verdict" ]; then
-    verdict="$(grep -oE '\b(passed|warnings|failed)\b' "$src" 2>/dev/null | head -1)"
+    verdict="$(grep -oE '^[[:space:]]*[-*][[:space:]]+(passed|warnings|failed)[[:space:]]*$' "$src" 2>/dev/null \
+                 | head -1 \
+                 | sed -E 's/^[[:space:]]*[-*][[:space:]]+//; s/[[:space:]]*$//')"
   fi
   if [ -z "$verdict" ]; then
     verdict="failed"  # Audit didn't produce a recognizable verdict → conservative

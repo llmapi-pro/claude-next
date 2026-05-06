@@ -3,6 +3,111 @@
 All notable changes to this project will be documented in this file.
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [0.2.9] - 2026-05-06
+
+### Fixed — pattern-match correctness sweep (5 sites)
+
+A user reported the install.sh dry-run had been printing two ⚠️ on every
+install since 0.1.0. Investigation found that the slot-matching regex was
+accepting any-length slot, then chaining false positives across the
+codebase. A focused fresh-context audit on "where else does pattern-match
+length / boundary go wrong" surfaced 4 more sibling sites in the same
+release scope.
+
+- **`scripts/ingest.sh` slot regex tightened to `[A-Z]{1,2}` + word boundary.**
+  Pre-0.2.9 used `[A-Za-z]+` (any case, any length), which had three real
+  false-positive failure modes:
+  - "next step is to fix bug" → slot=STEP (4-char word matched)
+  - "drop the file is broken" → slot=THE (3-char word matched)
+  - "drop a hint here" → slot=A (1-char article matched)
+  Each one injected a misleading "槽位 X 不存在" Chinese message into
+  Claude's context whenever a user happened to start a fresh window with
+  one of these very common openers. The new regex caps slot length at 2
+  (the allocator never produced 3+) and requires uppercase (kills the
+  1-letter-article ambiguity, since `/next` always produces uppercase
+  slots and nobody types `继续 a` manually). Trigger keywords
+  (`继续`/`next`/`continue`/`drop`/`移除`) remain case-insensitive.
+- **`continue X` actually works now (Audit Finding 4).** README,
+  SKILL.md, install.sh dry-run, and `list.sh` hint have all advertised
+  `continue` as a trigger keyword since 0.1.0, but the regex only
+  accepted `next` / `继续`. Every doc surface was lying. 0.2.9 adds
+  `[Cc][Oo][Nn][Tt][Ii][Nn][Uu][Ee]` to the trigger alternation so the
+  docs become honest. (Audit recommended this over editing all the doc
+  surfaces.)
+- **`scripts/common.sh slots_used` length-cap (Audit Finding 1).**
+  CHANGELOG 0.2.4 explicitly claimed both the bash version AND the JS
+  version of slot-file matching were tightened to 1-3 chars. Only the
+  JS side actually got the fix; bash kept the unbounded `sed -E
+  's#.*/([A-Z]+)\.md$#\1#'`. Symptom: a stranded `<SLOT>.audit-passA.md`
+  from a producer-window crash leaks through `slots_used` as a bogus
+  slot path (the `.audit-passA` cleanup normally hides this, but the
+  crash window was the whole point of 0.2.4's defense). Fixed: same
+  `{1,2}` cap + `-n + p` flag drops non-matching lines instead of
+  passing them through.
+- **`lib/slot.js SLOT_FILE_RE` aligned to `[A-Z]{1,2}\.md$`.** Was
+  `{1,3}` since 0.1.0; the allocator never produced 3-char slots. Tight
+  alignment between regex and producer eliminates one diverged-spec
+  surface that could later hide a bug.
+- **`scripts/audit-finalize.sh` verdict extraction anchored to bullet-line
+  format (Audit Findings 2 + 3).** Two siblings:
+  - The verdict awk scanned the line under `### Verdict` left-to-right
+    for any of {passed, warnings, failed} and printed the first match.
+    `templates/audit.rubric.md:39` documents the format as
+    `- passed | warnings | failed` (the full set as separator). When a
+    tired auditor literally echoed that template line, the awk always
+    returned `passed` — silent verdict corruption. Fixed by anchoring
+    to `^[ws]*[-*][ws]+VERDICT[ws]*$` (single-token bullet only),
+    which the rubric line with " | " separators cannot satisfy.
+  - The fallback grep used unanchored `\b(passed|warnings|failed)\b`,
+    which matched auditor prose like "the test passed before the fix"
+    anywhere in the body and stamped that into frontmatter. Same
+    single-token-bullet anchor applied.
+- **`bin/cli.js --resume` validates slot before injecting (Audit
+  Finding 5).** Pre-0.2.9 took the value as-is, so an invalid slot
+  silently no-op'd — the new window started with prompt `继续 foo`,
+  the hook ignored it (no match), and the orchestrator assumed resume
+  succeeded. Now rejects with `--resume: invalid slot "foo" (expected
+  1-2 letters, A-Z or AA-ZZ)` and exits 2. Uppercase normalization
+  before validation so `--resume a` / `--resume bb` work.
+
+### Fixed — install.sh dry-run probes
+
+The two ⚠️ that had been showing on every install since 0.1.0:
+
+- **`continue ZZ` → "slot ZZ does not exist"**: never matched (regex
+  only accepted `next`/`继续`) AND grepped for an English message that
+  doesn't exist (real message is Chinese 槽位 ZZ 不存在). Both halves
+  fixed: probe now uses `next ZZ` (with a parallel `继续 ZZ` probe for
+  the CN branch) and greps for the actual message.
+- **`next step is to fix the auth bug` triggers → false positive**: the
+  underlying bug is the regex tightening above. Probe now correctly
+  reports clean.
+
+Plus three new probes:
+
+- `drop the file is broken` (was a real false positive, now silent)
+- `next ABCD please` (length cap honored)
+- `next A.` (loads — confirms punctuation works as slot boundary)
+
+### Compatibility
+
+- **Lowercase pass-phrases (`继续 a`, `next b`, `drop a`) no longer
+  trigger.** Users who actually type lowercase need to switch to
+  uppercase. In practice everyone pastes the literal `继续 A` produced
+  by /next, which is always uppercase, so this is invisible to normal
+  users. README updated to drop the case-insensitive claim.
+- **3-char slot files** (`ABC.md` etc.) are no longer recognized by
+  `slots_used` or `SLOT_FILE_RE`. The allocator never produced these,
+  so no real handoff is affected. Anyone manually creating 3-char
+  slots needs to rename to 1-2 chars.
+- `audit_status` extraction is stricter — auditors that don't write a
+  proper single-token bullet under `### Verdict` will get the
+  conservative `failed` default rather than a wrong-but-confident
+  `passed`. This is the intended direction; it surfaces broken auditor
+  output instead of papering over it.
+- `claude-next auto --resume <slot>` now requires a 1-2 letter value;
+  invalid input fails at parse time instead of silently no-op'ing.
+
 ## [0.2.8] - 2026-05-06
 
 ### Added — consumed-handoff archive + stale-pool nudges
@@ -436,6 +541,7 @@ the spot fix didn't reach.
 - Single-user, single-machine — handoffs are local files, no sync.
 - Pass-phrase patterns currently hard-coded to `continue|next|继续` and `drop|移除`.
 
+[0.2.9]: https://github.com/llmapi-pro/claude-next/releases/tag/v0.2.9
 [0.2.8]: https://github.com/llmapi-pro/claude-next/releases/tag/v0.2.8
 [0.2.7]: https://github.com/llmapi-pro/claude-next/releases/tag/v0.2.7
 [0.2.6]: https://github.com/llmapi-pro/claude-next/releases/tag/v0.2.6

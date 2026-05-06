@@ -35,12 +35,32 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
   action=""
   slot=""
 
-  if [[ "${trimmed}" =~ ^(继续|[Nn][Ee][Xx][Tt])[[:space:]]+([A-Za-z]+) ]]; then
+  # Trigger keywords:
+  #   - 继续 / next / continue   → load handoff
+  #   - 移除 / drop              → archive (or rm with NEXT_ARCHIVE=0) handoff
+  # `continue` was advertised in README/SKILL.md/install.sh since 0.1.0 but the
+  # regex only accepted `next` / `继续` until 0.2.9 — every doc surface lied.
+  # Restored here so the docs are honest.
+  #
+  # Slot capture: bounded to 1-2 UPPERCASE chars matching what the allocator
+  # actually produces (slot.sh / lib/slot.js: A-Z then AA-ZZ), followed by a
+  # non-alpha boundary (whitespace, punctuation, or EOL).
+  #
+  # Why uppercase-only + {1,2}: pre-0.2.9 used `[A-Za-z]+` (any case, any
+  # length) which had three real false-positive failure modes:
+  #   - "next step is to fix bug" → slot=STEP (4-char word)
+  #   - "drop the file is broken" → slot=THE  (3-char word)
+  #   - "drop a hint here"        → slot=A    (1-char article)
+  # Capping length kills the first two; requiring uppercase kills the third
+  # (every realistic user pastes the literal `继续 A` produced by /next, which
+  # is always uppercase). Lowercase pass-phrases (`next a`) were a soft
+  # convenience the README mentioned; they're no longer supported in 0.2.9.
+  if [[ "${trimmed}" =~ ^(继续|[Nn][Ee][Xx][Tt]|[Cc][Oo][Nn][Tt][Ii][Nn][Uu][Ee])[[:space:]]+([A-Z]{1,2})([^A-Za-z]|$) ]]; then
     action="continue"
-    slot="$(printf '%s' "${BASH_REMATCH[2]}" | tr '[:lower:]' '[:upper:]')"
-  elif [[ "${trimmed}" =~ ^(移除|[Dd][Rr][Oo][Pp])[[:space:]]+([A-Za-z]+) ]]; then
+    slot="${BASH_REMATCH[2]}"
+  elif [[ "${trimmed}" =~ ^(移除|[Dd][Rr][Oo][Pp])[[:space:]]+([A-Z]{1,2})([^A-Za-z]|$) ]]; then
     action="remove"
-    slot="$(printf '%s' "${BASH_REMATCH[2]}" | tr '[:lower:]' '[:upper:]')"
+    slot="${BASH_REMATCH[2]}"
   else
     exit 0
   fi

@@ -105,7 +105,21 @@ function parseAutoArgs(argv) {
     if (a === '--status') { out.command = 'status'; continue; }
     if (a === '--dry-run') { out.dryRun = true; continue; }
     if (a === '--debug') { out.debug = true; continue; }
-    if (a === '--resume') { out.resumeSlot = argv[++i]; continue; }
+    if (a === '--resume') {
+      // Validate against ingest.sh's slot regex ([A-Z]{1,2} after the 0.2.9
+      // tightening). Without this, an invalid slot silently no-ops the
+      // resume — the new window starts with `继续 foo`, the hook ignores it,
+      // and the orchestrator assumes resume succeeded. Uppercase first so
+      // case-insensitive CLI usage still works on the producing side.
+      const raw = argv[++i];
+      const norm = raw && raw.toUpperCase();
+      if (!norm || !/^[A-Z]{1,2}$/.test(norm)) {
+        console.error(`--resume: invalid slot ${JSON.stringify(raw)} (expected 1-2 letters, A-Z or AA-ZZ)`);
+        process.exit(2);
+      }
+      out.resumeSlot = norm;
+      continue;
+    }
     if (a === '--cwd') { out.cwd = path.resolve(argv[++i]); continue; }
     if (a === '--claude-bin') { out.claudeBin = argv[++i]; continue; }
     if (a === '--max-turns-per-window') { out.maxTurnsPerWindow = Number(argv[++i]); continue; }

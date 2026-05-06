@@ -105,8 +105,15 @@ archive_or_rm() {
 }
 
 slots_used() {
+  # Length cap {1,2}: matches lib/slot.js SLOT_FILE_RE. Pre-0.2.9 this was
+  # unbounded `[A-Z]+` despite CHANGELOG 0.2.4 claiming both bash and JS
+  # were tightened — only JS actually got the fix. Symptom: a stranded
+  # <SLOT>.audit-passA.md from a producer-window crash leaks through as a
+  # bogus slot (the audit-finalize.sh consumer normally cleans these, but
+  # the crash window was the whole point of 0.2.4's defense).
+  # `-n + p` flag drops non-matching lines instead of pass-through.
   find "$NEXT_PENDING_DIR" -maxdepth 1 -name '*.md' -type f 2>/dev/null \
-    | sed -E 's#.*/([A-Z]+)\.md$#\1#' \
+    | sed -nE 's#.*/([A-Z]{1,2})\.md$#\1#p' \
     | sort
 }
 
