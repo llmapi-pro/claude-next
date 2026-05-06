@@ -3,6 +3,79 @@
 All notable changes to this project will be documented in this file.
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [0.2.8] - 2026-05-06
+
+### Added — consumed-handoff archive + stale-pool nudges
+
+Until 0.2.7, the three consume paths (`继续 X`, `移除 X`, `/next remove X`)
+all just `rm -f`'d the handoff. A handoff that took the full /next pipeline
+(identify task → allocate slot → write template → spawn auditor → produce
+口令) to create vanished irrecoverably the moment a new window picked it
+up. The README roadmap had this on the to-do list since 0.1.0 (`Optional
+consumed-handoff archive (NEXT_ARCHIVE=1)`); this release ships it
+**default-on** since the asymmetric failure mode (silent loss vs. trivial
+disk cost) only points one way.
+
+- **Archive on consume.** All three consume sites now route through
+  `archive_or_rm` in `scripts/common.sh` instead of bare `rm -f`. Default
+  destination: `~/.claude/next/archive/<SLOT>-<UTC>.md` with compact ISO
+  timestamp (no colons, Windows-FS safe). Same-second collisions
+  disambiguated with `-1`/`-2` suffix up to 99. Continue path archives the
+  post-Pass-B copy so the drift-check section survives. Pure ASCII slot
+  names + numeric timestamp = no shell-metacharacter risk.
+- **Sliding-window cap.** `NEXT_ARCHIVE_MAX=100` by default; on every
+  archive write, `ls -t` newest-first and drop everything past the cap.
+  Set `NEXT_ARCHIVE_MAX=0` for unlimited retention. Uses `while read`
+  loop (not `xargs -r`) for portability — BSD xargs on macOS lacks `-r`
+  and would error on empty input.
+- **Opt-out preserves old behavior.** `NEXT_ARCHIVE=0` falls back to
+  bare `rm -f`. Anyone who explicitly wants the pre-0.2.8 behavior gets
+  it with one env var.
+- **Custom archive location.** `NEXT_ARCHIVE_DIR=...` overrides the
+  default location for users who want archives on a different volume.
+
+### Added — `/next` and `/next list` surface stale handoffs
+
+The 0.2.7 audit noted that the real risk of slot exhaustion isn't running
+out of A-Z (you'd need 702 concurrent pending — unrealistic) but rather
+the UX rot of a handoff sitting at slot `D` for two weeks because nobody
+notices. This release adds two nudges:
+
+- **`scripts/slot.sh`** scans the pending pool after allocation and emits
+  a stderr summary of any handoffs older than `NEXT_STALE_HOURS` (default
+  72h): `⚠️ 2 pending handoff(s) older than 72h still in pool: B(96h),F(120h)`.
+  Goes to stderr only — the SKILL.md reads stdout for the allocated slot,
+  so the protocol is unaffected. Silent when nothing is stale.
+- **`scripts/list.sh`** now sorts oldest-first (so stale items surface at
+  the top instead of buried under fresh ones) and tags each entry with a
+  marker: `⚠️` for `>NEXT_STALE_HOURS` (default 72h), `ℹ️` for >24h, blank
+  otherwise. The header line says "(N, oldest first)" so the change is
+  obvious.
+
+### Improved
+
+- **Slot exhaustion error message** now points at the right tools:
+  `Run /next list (sorted oldest-first) and /next remove <SLOT> to clear.`
+  Up from the terse 0.2.7 version that didn't mention list ordering.
+- **`continue` ctx text** updated from "源文件已消费并删除" to
+  "源文件已消费" — accurate under both archive-on (default) and archive-off
+  configurations.
+- **`移除` ctx text** updated from "已删除" to "已移除" for the same reason.
+
+### Compatibility
+
+- **Default behavior changes** for the consume path: handoffs now persist
+  in the archive instead of being deleted. Pure additive on disk; no
+  existing call path produces different output. If you want byte-identical
+  pre-0.2.8 behavior on consume, set `NEXT_ARCHIVE=0` in your shell
+  profile or in the hook command.
+- `/next list` output gained the marker prefix and oldest-first ordering;
+  any script that parsed the old alphabetical order needs updating, but
+  the field layout (slot/task/project/age/audit) is unchanged.
+- Auto-mode (`claude-next auto`) is unaffected — `lib/slot.js` doesn't
+  call the shell archive helper, and pending handoffs are still consumed
+  via the same shell ingest hook (which now archives).
+
 ## [0.2.7] - 2026-05-05
 
 ### Fixed — same-class follow-up sweep after 0.2.6 (举一反三)
@@ -363,6 +436,7 @@ the spot fix didn't reach.
 - Single-user, single-machine — handoffs are local files, no sync.
 - Pass-phrase patterns currently hard-coded to `continue|next|继续` and `drop|移除`.
 
+[0.2.8]: https://github.com/llmapi-pro/claude-next/releases/tag/v0.2.8
 [0.2.7]: https://github.com/llmapi-pro/claude-next/releases/tag/v0.2.7
 [0.2.6]: https://github.com/llmapi-pro/claude-next/releases/tag/v0.2.6
 [0.2.5]: https://github.com/llmapi-pro/claude-next/releases/tag/v0.2.5

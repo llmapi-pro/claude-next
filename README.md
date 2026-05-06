@@ -250,14 +250,19 @@ Defaults are sensible, override via env vars if needed:
 | Variable | Default | Purpose |
 |---|---|---|
 | `NEXT_HOME` | `~/.claude/next` | Runtime state directory |
-| `NEXT_PENDING_DIR` | `$NEXT_HOME/pending` | Where handoffs live |
+| `NEXT_PENDING_DIR` | `$NEXT_HOME/pending` | Where pending handoffs live |
+| `NEXT_ARCHIVE_DIR` | `$NEXT_HOME/archive` | Where consumed handoffs go |
+| `NEXT_ARCHIVE` | `1` | `0` to disable archive (consumed → `rm`) |
+| `NEXT_ARCHIVE_MAX` | `100` | Sliding-window cap (newest by mtime); `0` = unlimited |
+| `NEXT_STALE_HOURS` | `72` | `/next` and `/next list` flag pending older than this |
 | `NEXT_MIN_UNK` | `3` | Minimum uncertainty items |
+| `NEXT_DEBUG` | `0` | `1` writes `ingest.sh` xtrace to `$NEXT_HOME/ingest.debug.log` |
 
 ---
 
 ## Roadmap
 
-- [ ] Optional consumed-handoff archive (`NEXT_ARCHIVE=1`)
+- [x] Consumed-handoff archive (default on, env-tunable) — shipped 0.2.8
 - [ ] MCP server wrapper (for Cursor, Cline, other MCP-compatible clients)
 - [ ] Auto-trigger at configurable token thresholds
 - [ ] PowerShell fallback for pure-Windows environments (no Git-bash)

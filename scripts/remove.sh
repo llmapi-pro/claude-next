@@ -29,5 +29,5 @@ task="$(awk '
   flag && NF && !/^</ {print; exit}
 ' "$f")"
 
-rm -f "$f"
+archive_or_rm "$f" "$slot"
 echo "Removed handoff $slot: ${task:-(unlabeled)}"

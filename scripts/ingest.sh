@@ -59,8 +59,8 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
       /^# / && flag {exit}
       flag && NF && !/^</ {print; exit}
     ' "$f")"
-    rm -f "$f"
-    ctx="[next skill] 用户要求移除 handoff ${slot}（任务: ${task:-未标注}）。该 handoff 已删除。
+    archive_or_rm "$f" "${slot}"
+    ctx="[next skill] 用户要求移除 handoff ${slot}（任务: ${task:-未标注}）。该 handoff 已移除。
 请简短确认: \"已移除 ${slot}\"。不要加载任何交接内容，也不要假设用户想续接——他明确说了移除。"
     printf '%s' "$ctx" | json_emit_context
     exit 0
@@ -78,12 +78,14 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
   body="$(cat "$f")"
 
-  # Consume: delete handoff
-  rm -f "$f"
+  # Consume: archive (default) or delete (NEXT_ARCHIVE=0). The Pass B section
+  # validity.sh appended is included in the archived copy, so the audit trail
+  # survives the consume.
+  archive_or_rm "$f" "${slot}"
 
   ctx="[next skill] 用户已粘贴口令续接 handoff ${slot}。
 以下是完整交接稿（已包含 Pass A 审稿和刚跑完的 Pass B drift 检查）。
-源文件已消费并删除。
+源文件已消费。
 
 你的职责：
 1. 简短告诉用户你已接手此任务（引用 Task summary 里那句话）

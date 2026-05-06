@@ -7,6 +7,7 @@ set -u
 NEXT_HOME="${NEXT_HOME:-$HOME/.claude/next}"
 NEXT_SKILL_HOME="${NEXT_SKILL_HOME:-$HOME/.claude/skills/next}"
 NEXT_PENDING_DIR="$NEXT_HOME/pending"
+NEXT_ARCHIVE_DIR="${NEXT_ARCHIVE_DIR:-$NEXT_HOME/archive}"
 NEXT_MIN_UNK="${NEXT_MIN_UNK:-3}"
 
 mkdir -p "$NEXT_PENDING_DIR"
@@ -50,6 +51,57 @@ json_emit_context() {
     };
     print encode_json($out);
   '
+}
+
+# Archive (or delete) a consumed handoff. Single source of truth for the
+# 3 consume sites (ingest.sh continue, ingest.sh remove, remove.sh).
+#
+# Default: mv to $NEXT_ARCHIVE_DIR/<SLOT>-<UTC>.md, keep last NEXT_ARCHIVE_MAX
+# (default 100) by mtime, drop the rest. Set NEXT_ARCHIVE=0 to fall back to
+# old `rm -f` behavior. Set NEXT_ARCHIVE_MAX=0 for unlimited retention.
+#
+# Filename uses compact ISO (no colons) so it's portable to Windows FS.
+# Falls back to `rm -f` on any archive failure — consume must never fail.
+#
+# Args: $1 = handoff file path, $2 = slot label (for filename prefix)
+archive_or_rm() {
+  local f="$1"
+  local slot="${2:-X}"
+  if [ "${NEXT_ARCHIVE:-1}" = "0" ]; then
+    rm -f "$f"
+    return
+  fi
+  if ! mkdir -p "$NEXT_ARCHIVE_DIR" 2>/dev/null; then
+    rm -f "$f"
+    return
+  fi
+  local stamp
+  stamp="$(date -u +%Y%m%dT%H%M%SZ)"
+  local target="$NEXT_ARCHIVE_DIR/${slot}-${stamp}.md"
+  # Disambiguate same-second collisions (rapid /next + 移除 in scripted use)
+  local i=0
+  while [ -e "$target" ]; do
+    i=$((i+1))
+    target="$NEXT_ARCHIVE_DIR/${slot}-${stamp}-${i}.md"
+    [ "$i" -gt 99 ] && break
+  done
+  if ! mv "$f" "$target" 2>/dev/null; then
+    rm -f "$f"
+    return
+  fi
+
+  # Sliding-window prune: keep newest NEXT_ARCHIVE_MAX, drop the rest.
+  local cap="${NEXT_ARCHIVE_MAX:-100}"
+  if [ "$cap" -gt 0 ] 2>/dev/null; then
+    # ls -t newest-first; tail starting at line cap+1 = items beyond the cap.
+    # while-read instead of xargs -r: BSD xargs (macOS) lacks -r and runs the
+    # rm even on empty stdin, which would error out.
+    ls -t "$NEXT_ARCHIVE_DIR"/*.md 2>/dev/null \
+      | tail -n +$((cap + 1)) \
+      | while IFS= read -r old; do
+          [ -n "$old" ] && rm -f "$old"
+        done
+  fi
 }
 
 slots_used() {
