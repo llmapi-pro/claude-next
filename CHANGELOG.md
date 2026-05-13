@@ -3,6 +3,62 @@
 All notable changes to this project will be documented in this file.
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [Unreleased]
+
+### Fixed — three correctness bugs surfaced by fresh-context audit
+
+A reverse-proved sweep against `origin/main` v0.2.9: every claim below was
+reproduced with a runnable test against current src **before** any code
+change, to avoid the assumption-trap that produced earlier abandoned work
+(see PR #3 for the audit trail per bug).
+
+- **`scripts/common.sh` honors `NEXT_PENDING_DIR` env var.** CHANGELOG 0.2.5
+  claimed the override "now actually works"; the JS side (`lib/slot.js`)
+  did honor `process.env.NEXT_PENDING_DIR`; but `scripts/common.sh:9` still
+  assigned unconditionally, silently clobbering any user-set value. Shell
+  scripts (ingest / list / remove) wrote to `$NEXT_HOME/pending` while
+  auto-mode read the user's override — a quiet split-brain. Fix: switch
+  to `${NEXT_PENDING_DIR:-$NEXT_HOME/pending}`. Reproduce: pre-fix prints
+  `/tmp/<HOME>/pending`, post-fix prints `/tmp/user`. Now matches README's
+  Configuration table and lib/slot.js behavior.
+
+- **`ClaudeDriver.turns` counts assistant turns, not user sends.**
+  `_turnCount` was bumped in `send(userText)`, so `driver.turns` reflected
+  user-message count. Rotator's `maxTurnsPerWindow` cap (default 30)
+  expects assistant turns — the rotate path itself injected `/next` plus
+  (pre-0.2.10) 2 auto-confirm nudges = 3 user msgs / 1 turn, so the
+  counter over-ran by ~3 per rotation. Custom low caps like
+  `--max-turns-per-window 5` could re-trigger rotation immediately on
+  the rotate path itself. Fix: bump `_turnCount` from the `result`
+  stream-json event (one per assistant turn), preferring the child's
+  authoritative `num_turns` field when present. Reproduce: 3 user sends
+  with 0 result events → pre-fix `driver.turns === 3`, post-fix `=== 0`.
+
+- **Auto-mode no longer sends stale 8s/60s `继续` auto-confirms.**
+  0.2.0-0.2.2 nudged the rotate path with two auto-confirm `继续`
+  messages at +8 s and +60 s after `/next`, to unblock SKILL.md's
+  "3 秒内无异议" gate. 0.2.3 removed that gate (SKILL.md: "Do not stop
+  turn here") but the nudges in `lib/auto.js` were left behind. They
+  inflated `driver.turns` (now fixed at source) and a mid-audit `继续`
+  landed as a fresh user message that could disturb audit-finalize.
+  `waitForNewHandoff`'s 300 s timeout already promotes a genuinely
+  stuck handoff to `verdict='aborted'` — that's the right defense.
+  Fix: remove both `setTimeout` calls, keep a comment explaining why
+  for archaeology. Reproduce: pre-fix a recording mock sees `/next`
+  plus two `继续` lines at +8 s/+60 s; post-fix sees only `/next`.
+
+### Compatibility
+
+- Pure additive on the shell side: anyone who never set
+  `NEXT_PENDING_DIR` sees identical behavior. Anyone who *did* set it
+  and was previously confused that auto-mode and shell scripts pointed
+  at different dirs now gets the consistent behavior the docs promised.
+- Auto-mode turn-count change is invisible until the rotate path
+  triggers; thereafter rotations no longer count against the per-window
+  cap themselves.
+- Stale auto-confirms removed: if you ever observed the child reacting
+  to an unexpected `继续` mid-rotation, that's gone.
+
 ## [0.2.9] - 2026-05-06
 
 ### Fixed — pattern-match correctness sweep (5 sites)
