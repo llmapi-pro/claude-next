@@ -21,10 +21,21 @@ const pkg = require(path.join(pkgRoot, 'package.json'));
 
 const HOME = os.homedir();
 const TARGET = path.join(HOME, '.claude', 'skills', 'next');
-const AUTO_SENTINEL = path.join(HOME, '.claude', 'next', 'auto.stop');
-const AUTO_SESSIONS = path.join(HOME, '.claude', 'next', 'auto-sessions');
+const SETTINGS = path.join(HOME, '.claude', 'settings.json');
+const RUNTIME_DIR = path.join(HOME, '.claude', 'next');
+const AUTO_SENTINEL = path.join(RUNTIME_DIR, 'auto.stop');
+const AUTO_SESSIONS = path.join(RUNTIME_DIR, 'auto-sessions');
 
 const ITEMS = ['scripts', 'templates', 'SKILL.md', 'install.sh', 'README.md'];
+
+// Hook is `bash ingest.sh`. Both POSIX and Windows-with-Git-Bash satisfy this.
+// On pure Windows the install still succeeds but we warn that the hook needs
+// bash at runtime — porting hook scripts to Node is the v0.3.x track.
+const HOOK_CMD = 'bash "$HOME/.claude/skills/next/scripts/ingest.sh"';
+// Substring match for idempotent re-install. Tolerate both / and \ separators
+// so users on Windows who hand-edited the hook with backslashes don't get a
+// duplicate hook entry.
+const HOOK_RE = /next[\/\\]scripts[\/\\]ingest\.sh/;
 
 function copyRecursive(src, dst) {
   if (typeof fs.cpSync === 'function') { fs.cpSync(src, dst, { recursive: true, force: true }); return; }
@@ -38,26 +49,176 @@ function copyRecursive(src, dst) {
   }
 }
 
+function sortKeysDeep(obj) {
+  if (obj === null || typeof obj !== 'object') return obj;
+  if (Array.isArray(obj)) return obj.map(sortKeysDeep);
+  const out = {};
+  for (const k of Object.keys(obj).sort()) out[k] = sortKeysDeep(obj[k]);
+  return out;
+}
+
+function bashAvailable() {
+  // spawnSync swallows ENOENT into result.error on Windows; check both.
+  const r = spawnSync('bash', ['--version'], { stdio: 'ignore' });
+  return !r.error && r.status === 0;
+}
+
+function backupOrInitSettings() {
+  if (!fs.existsSync(SETTINGS)) {
+    fs.mkdirSync(path.dirname(SETTINGS), { recursive: true });
+    fs.writeFileSync(SETTINGS, '{}\n', 'utf8');
+    return null;
+  }
+  // Match install.sh date +%Y%m%d-%H%M%S (local-time).
+  const d = new Date();
+  const pad = (n) => String(n).padStart(2, '0');
+  const stamp = `${d.getFullYear()}${pad(d.getMonth() + 1)}${pad(d.getDate())}-${pad(d.getHours())}${pad(d.getMinutes())}${pad(d.getSeconds())}`;
+  const bak = `${SETTINGS}.bak-${stamp}`;
+  fs.copyFileSync(SETTINGS, bak);
+  return bak;
+}
+
+function mergeHookIntoSettings(hookCmd) {
+  // UTF-8 contract: read as utf8, JSON parse, JSON stringify, write as utf8.
+  // Node JSON.stringify emits raw codepoints (not \uXXXX escapes), and utf8
+  // write encodes them to valid bytes — so Chinese hook labels / paths
+  // round-trip without mojibake (the same property install.sh's perl block
+  // achieved via JSON::PP ->utf8).
+  const raw = fs.readFileSync(SETTINGS, 'utf8');
+  let s;
+  try { s = JSON.parse(raw); } catch (_) { s = {}; }
+  if (!s || typeof s !== 'object' || Array.isArray(s)) s = {};
+
+  s.hooks = s.hooks || {};
+  s.hooks.UserPromptSubmit = s.hooks.UserPromptSubmit || [];
+  const ups = s.hooks.UserPromptSubmit;
+
+  let already = false;
+  for (const e of ups) {
+    if (!e || typeof e !== 'object' || !Array.isArray(e.hooks)) continue;
+    for (const h of e.hooks) {
+      if (h && typeof h === 'object' && typeof h.command === 'string' && HOOK_RE.test(h.command)) {
+        already = true; break;
+      }
+    }
+    if (already) break;
+  }
+  if (already) return { added: false };
+
+  ups.push({ hooks: [{ type: 'command', command: hookCmd }] });
+  // canonical = sorted keys (matches install.sh's ->canonical->encode).
+  const json = JSON.stringify(sortKeysDeep(s), null, 2) + '\n';
+  fs.writeFileSync(SETTINGS, json, 'utf8');
+  return { added: true };
+}
+
+function verifyHookInSettings() {
+  const raw = fs.readFileSync(SETTINGS, 'utf8');
+  const s = JSON.parse(raw);
+  const ups = (s.hooks && s.hooks.UserPromptSubmit) || [];
+  let found = false;
+  for (const e of ups) {
+    for (const h of (e.hooks || [])) {
+      if (h && typeof h.command === 'string' && HOOK_RE.test(h.command)) found = true;
+    }
+  }
+  return { found, total: ups.length };
+}
+
+function runDryHook(input) {
+  const ingestPath = path.join(TARGET, 'scripts', 'ingest.sh');
+  const r = spawnSync('bash', [ingestPath], { input, stdio: ['pipe', 'pipe', 'pipe'], encoding: 'utf8' });
+  return ((r.stdout || '') + '').trim();
+}
+
+const DRY_RUN_TESTS = [
+  { input: '{}', label: 'empty input', expectEmpty: true },
+  { input: '{"prompt":"hello world","session_id":"test","hook_event_name":"UserPromptSubmit"}', label: 'non-matching prompt', expectEmpty: true },
+  { input: '{"prompt":"next ZZ","session_id":"test","hook_event_name":"UserPromptSubmit"}', label: 'next ZZ → missing-slot', expectMatch: /槽位 ZZ 不存在/ },
+  { input: '{"prompt":"继续 ZZ","session_id":"test","hook_event_name":"UserPromptSubmit"}', label: '继续 ZZ → missing-slot (CN trigger)', expectMatch: /槽位 ZZ 不存在/ },
+  { input: '{"prompt":"next step is to fix the auth bug","session_id":"test","hook_event_name":"UserPromptSubmit"}', label: '"next step is..." → no false positive', expectEmpty: true },
+  { input: '{"prompt":"drop the file is broken","session_id":"test","hook_event_name":"UserPromptSubmit"}', label: '"drop the file..." → no false positive', expectEmpty: true },
+  { input: '{"prompt":"next ABCD please","session_id":"test","hook_event_name":"UserPromptSubmit"}', label: '"next ABCD..." → 4-char slot rejected', expectEmpty: true },
+  { input: '{"prompt":"next A.","session_id":"test","hook_event_name":"UserPromptSubmit"}', label: '"next A." → punctuation boundary', expectMatch: /槽位 A 不存在/ },
+];
+
 function install() {
-  console.log('[claude-next] Installing skill files to:', TARGET);
+  console.log('━━━ /next skill installer ━━━\n');
+
+  // [1/5] Copy files
+  console.log('[1/5] Copying skill files to:', TARGET);
   fs.mkdirSync(TARGET, { recursive: true });
   for (const item of ITEMS) {
     const src = path.join(pkgRoot, item);
     const dst = path.join(TARGET, item);
-    if (!fs.existsSync(src)) { console.error(`[claude-next] Missing: ${item}`); process.exit(1); }
+    if (!fs.existsSync(src)) { console.error(`  ✗ Missing: ${item}`); process.exit(1); }
     copyRecursive(src, dst);
   }
-  try {
-    const scriptsDir = path.join(TARGET, 'scripts');
-    for (const f of fs.readdirSync(scriptsDir)) {
-      if (f.endsWith('.sh')) fs.chmodSync(path.join(scriptsDir, f), 0o755);
+  // chmod on POSIX; Windows ignores file modes so skip.
+  if (process.platform !== 'win32') {
+    try {
+      const sd = path.join(TARGET, 'scripts');
+      for (const f of fs.readdirSync(sd)) {
+        if (f.endsWith('.sh')) fs.chmodSync(path.join(sd, f), 0o755);
+      }
+      fs.chmodSync(path.join(TARGET, 'install.sh'), 0o755);
+    } catch (_) {}
+  }
+  fs.mkdirSync(path.join(RUNTIME_DIR, 'pending'), { recursive: true });
+  console.log('  ✓ Files copied');
+  console.log('  ✓ Runtime dir:', path.join(RUNTIME_DIR, 'pending'));
+
+  // [2/5] Backup
+  console.log('\n[2/5] Backing up settings.json...');
+  const bak = backupOrInitSettings();
+  console.log(bak ? `  ✓ Backup: ${bak}` : '  • No existing settings.json; created fresh.');
+
+  // [3/5] Merge hook
+  console.log('\n[3/5] Merging UserPromptSubmit hook...');
+  const m = mergeHookIntoSettings(HOOK_CMD);
+  console.log(m.added ? '  ✓ Hook added.' : '  • /next hook already present; skipped.');
+
+  // [4/5] Verify
+  console.log('\n[4/5] Verifying...');
+  const v = verifyHookInSettings();
+  if (!v.found) { console.error('  ✗ Hook verification failed.'); process.exit(1); }
+  console.log(`  ✓ Hook in place. Total UserPromptSubmit entries: ${v.total}`);
+
+  // [5/5] Dry-run (requires bash). On pure Windows we skip + warn instead of fail.
+  console.log('\n[5/5] Dry-run hook...');
+  const hasBash = bashAvailable();
+  if (!hasBash) {
+    console.log('  ⚠ bash not on PATH — skipping runtime dry-run.');
+    console.log('    The hook command is `bash ".../ingest.sh"`, which needs bash at runtime.');
+    console.log('    On Windows: install Git for Windows (https://gitforwindows.org/) to get bash.exe.');
+  } else {
+    for (const t of DRY_RUN_TESTS) {
+      const out = runDryHook(t.input);
+      if (t.expectEmpty) {
+        if (out === '') console.log(`  ✓ ${t.label} → silent passthrough`);
+        else console.log(`  ⚠ ${t.label} produced output: ${out.split('\n')[0]}`);
+      } else if (t.expectMatch) {
+        if (t.expectMatch.test(out)) console.log(`  ✓ ${t.label}`);
+        else console.log(`  ⚠ ${t.label} unexpected output: ${(out || '(empty)').split('\n')[0]}`);
+      }
     }
-    fs.chmodSync(path.join(TARGET, 'install.sh'), 0o755);
-  } catch (_) {}
-  console.log('[claude-next] Running install.sh...\n');
-  const result = spawnSync('bash', [path.join(TARGET, 'install.sh')], { stdio: 'inherit', cwd: TARGET });
-  if (result.error) { console.error('[claude-next] bash failed:', result.error.message); process.exit(1); }
-  if (result.status !== 0) process.exit(result.status || 1);
+  }
+
+  console.log('\n━━━ Install complete ━━━\n');
+  console.log('Next steps:');
+  console.log('  1. Open a new Claude Code window. Try   /next list   (should say: No pending handoffs.)');
+  console.log('  2. In a real project, run   /next   to produce your first handoff.');
+  console.log('  3. Open another window and paste   继续 X   (or  next X) to verify continuation.');
+  console.log('');
+  if (!hasBash) {
+    console.log('⚠ This system has no bash on PATH. The /next hook fires `bash ingest.sh` so it will be a no-op until bash is installed.');
+    console.log('  Windows: install Git for Windows — https://gitforwindows.org/  (provides bash.exe in PATH)');
+    console.log('  A future v0.3.x track will port the hook to Node so bash becomes optional.');
+    console.log('');
+  }
+  console.log('Uninstall:');
+  console.log(`  rm -rf ${TARGET} ${RUNTIME_DIR}`);
+  console.log(`  restore settings: cp ${SETTINGS}.bak-<latest> ${SETTINGS}`);
 }
 
 function version() { console.log(pkg.version); }
