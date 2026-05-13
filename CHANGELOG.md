@@ -3,6 +3,35 @@
 All notable changes to this project will be documented in this file.
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [Unreleased]
+
+### Changed — `npx claude-next install` no longer requires Perl
+
+The install path now does its JSON-merge work in Node instead of shelling
+out to `bash install.sh` (which used Perl + JSON::PP). On pure Windows
+without Git Bash / WSL / Strawberry Perl, `npx claude-next install` used
+to fail at the Perl preflight; now it succeeds. The dry-run phase
+(which still calls `bash ingest.sh` to verify the hook) auto-skips with
+a clear warning if bash is unavailable, and the install message
+explicitly tells Windows users to grab Git for Windows so the runtime
+hook can fire.
+
+- `bin/cli.js` ports all five install phases (copy / backup / merge /
+  verify / dry-run) to Node — same hook detection (substring on
+  `next/scripts/ingest.sh`), same idempotent re-install behavior, same
+  canonical-sorted-key JSON output, same UTF-8 contract so Chinese hook
+  labels and emoji round-trip cleanly.
+- `install.sh` is kept in the package as a documented legacy path; users
+  on POSIX with Perl can still run it directly. `npx claude-next install`
+  no longer invokes it.
+- Hook command unchanged (`bash "$HOME/.claude/skills/next/scripts/ingest.sh"`);
+  removing the bash runtime requirement is the v0.3.x track.
+
+Reverse-proved on WSL POSIX (8/8 dry-run cases) + sandbox HOME with no
+bash on PATH (install completes, hook in place, runtime warning shown).
+Re-install + pre-existing-hooks merge + Chinese/emoji UTF-8 round-trip
+all verified.
+
 ## [0.2.10] - 2026-05-13
 
 ### Fixed — three correctness bugs surfaced by fresh-context audit

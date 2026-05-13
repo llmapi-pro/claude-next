@@ -100,14 +100,25 @@ npx claude-next install
 ### Manual
 
 ```bash
-git clone https://github.com/llmapi-pro/claude-next ~/.claude/skills/next
-bash ~/.claude/skills/next/install.sh
+git clone https://github.com/llmapi-pro/claude-next
+node claude-next/bin/cli.js install
+# legacy POSIX-with-perl path also still works:
+# bash claude-next/install.sh
 ```
 
 The installer is **idempotent**:
 - Backs up your existing `~/.claude/settings.json` to `.bak-<timestamp>`
 - Adds only the `UserPromptSubmit` hook, preserving every other field
-- Self-tests three hook scenarios before declaring success
+- Self-tests the hook end-to-end before declaring success (auto-skipped when bash is unavailable, with a clear warning)
+
+### Windows users
+
+`npx claude-next install` works on pure Windows (no Perl required as of
+the Unreleased v0.3.x). Once installed, the hook command is
+`bash ".../ingest.sh"`, which needs **bash on PATH at runtime**. Install
+[Git for Windows](https://gitforwindows.org/) to get `bash.exe`; the
+installer detects the absence and tells you exactly that. Removing the
+bash runtime requirement is the next track on the roadmap.
 
 ### Uninstall
 
@@ -223,10 +234,12 @@ Because the auditor is fresh, it catches exactly the class of error that long-co
 
 ## Compatibility
 
-- **Claude Code** on macOS, Linux, or Windows (Git-bash)
-- **Requires**: `bash`, `perl` (core modules only — `JSON::PP`, `Time::Local` — both ship with Perl 5.14+)
+- **Claude Code** on macOS, Linux, or Windows (with Git for Windows)
+- **Install** (`npx claude-next install`) requires: **Node ≥16.7** only — no Perl, no bash needed at install time.
+- **Runtime** (the `/next` hook itself) requires: `bash` on PATH. POSIX has it; Windows users install [Git for Windows](https://gitforwindows.org/).
 - **Optional**: `git` and `docker` for richer drift/audit checks
-- **Does not require**: Python, `jq`, Node (except for the `npx` installer), or any external LLM API
+- **Legacy** install path `bash install.sh` still works on POSIX-with-Perl (`JSON::PP`, `Time::Local` — core since Perl 5.14+) and is kept as a documented fallback.
+- **Does not require**: Python, `jq`, or any external LLM API
 
 ---
 
@@ -265,7 +278,8 @@ Defaults are sensible, override via env vars if needed:
 - [x] Consumed-handoff archive (default on, env-tunable) — shipped 0.2.8
 - [ ] MCP server wrapper (for Cursor, Cline, other MCP-compatible clients)
 - [ ] Auto-trigger at configurable token thresholds
-- [ ] PowerShell fallback for pure-Windows environments (no Git-bash)
+- [x] Perl-free install on pure Windows (`npx claude-next install`) — shipped in Unreleased v0.3.x; the runtime hook still needs bash, which is the next milestone
+- [ ] Node-native hook scripts so the `bash` runtime requirement disappears (pure-Windows end-to-end)
 - [ ] Per-project handoff directories (isolate monorepo sub-projects)
 - [ ] Handoff signing for team use (cryptographically attest audit verdict)
 
