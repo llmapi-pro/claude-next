@@ -3,7 +3,7 @@
 All notable changes to this project will be documented in this file.
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
-## [Unreleased]
+## [0.2.10] - 2026-05-13
 
 ### Fixed — three correctness bugs surfaced by fresh-context audit
 
